@@ -1,0 +1,185 @@
+from Constants import connString
+import pyodbc
+import datetime
+import uuid
+from Constants import ehr_contract_address
+from web3 import Web3, HTTPProvider
+import json
+import pprint
+
+from PatientsModel import PatientsModel
+from DoctorsModel import DoctorsModel
+
+
+class EHRRecordsModel:
+    def _init_(self, ehrRecordID = '',effDate = '',patientID = '',doctorID = '',disease='', prescriptionFile='', isBlockChainGenerated = False,hash = '',prevHash = '',sequenceNumber = 0,patientModel = None,doctorModel = None):
+        self.ehrRecordID = ehrRecordID
+        self.effDate = effDate
+        self.patientID = patientID
+        self.doctorID = doctorID
+        self.disease = disease
+        self.prescriptionFile = prescriptionFile
+        self.isBlockChainGenerated = isBlockChainGenerated
+        self.hash = hash
+        self.prevHash = prevHash
+        self.sequenceNumber = sequenceNumber
+        self.patientModel = patientModel
+        self.doctorModel = doctorModel
+       
+        
+
+    @staticmethod
+    def get_all():
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT * FROM EHRRecords ORDER BY effDate"
+        cursor.execute(sqlcmd1)
+        records = []
+        for dbrow in cursor.fetchall():
+            row = EHRRecordsModel(dbrow[0],dbrow[1],dbrow[2],dbrow[3],dbrow[4],dbrow[5],dbrow[6],dbrow[7],dbrow[8],dbrow[9])
+            row.patientModel = PatientsModel.get_by_id(dbrow[2])
+            records.append(row)
+        cursor.close()
+        conn.close()
+        return records
+
+    @staticmethod
+    def get_all_patients_by_doctor_id(doctor_id):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT * FROM EHRRecords WHERE doctorID = ? ORDER BY effDate"
+        cursor.execute(sqlcmd1, doctor_id)
+        records = []
+        for dbrow in cursor.fetchall():
+            row = EHRRecordsModel(dbrow[0], dbrow[1], dbrow[2], dbrow[3], dbrow[4], dbrow[5], dbrow[6], dbrow[7],
+                                  dbrow[8], dbrow[9])
+            row.patientModel = PatientsModel.get_by_id(dbrow[2])
+            records.append(row)
+        cursor.close()
+        conn.close()
+        return records
+
+    @staticmethod
+    def get_all_patient_information_by_patient_id(patient_id):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT * FROM EHRRecords WHERE patientID = ? ORDER BY effDate"
+        cursor.execute(sqlcmd1, patient_id)
+        records = []
+        for dbrow in cursor.fetchall():
+            row = EHRRecordsModel(dbrow[0], dbrow[1], dbrow[2], dbrow[3], dbrow[4], dbrow[5], dbrow[6], dbrow[7],
+                                  dbrow[8], dbrow[9])
+            row.patientModel = PatientsModel.get_by_id(dbrow[2])
+            row.doctorModel = DoctorsModel.get_by_id(dbrow[3])
+            records.append(row)
+        cursor.close()
+        conn.close()
+        return records
+
+    @staticmethod
+    def get_name_id():
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT ehrRecordID,  FROM EHRRecords ORDER BY "
+        cursor.execute(sqlcmd1)
+        records = []
+        for dbrow in cursor.fetchall():
+            row = EHRRecordsModel(dbrow[0],dbrow[1],dbrow[2],dbrow[3],dbrow[4],dbrow[5],dbrow[6],dbrow[7],dbrow[8],dbrow[9])
+            records.append(row)
+        cursor.close()
+        conn.close()
+        return records
+        
+    @staticmethod
+    def get_by_id(unique_id):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT * FROM EHRRecords WHERE ehrRecordID = ?"
+        cursor.execute(sqlcmd1, unique_id)
+        record = None
+        for dbrow in cursor.fetchall():
+            record = EHRRecordsModel(dbrow[0],dbrow[1],dbrow[2],dbrow[3],dbrow[4],dbrow[5],dbrow[6],dbrow[7],dbrow[8],dbrow[9])
+        cursor.close()
+        conn.close()
+        return record
+
+    @staticmethod
+    def get_patient_info_by_patient_id(patient_id):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT * FROM EHRRecords WHERE patientID = ? ORDER BY effDate DESC"
+        cursor.execute(sqlcmd1, patient_id)
+        records = []
+        for dbrow in cursor.fetchall():
+            row = EHRRecordsModel(dbrow[0],dbrow[1],dbrow[2],dbrow[3],dbrow[4],dbrow[5],dbrow[6],dbrow[7],dbrow[8],dbrow[9])
+            row.patientModel = PatientsModel.get_by_id(dbrow[2])
+            row.doctorModel = DoctorsModel.get_by_id(dbrow[3])
+            records.append(row)
+        cursor.close()
+        conn.close()
+        return records
+
+    @staticmethod
+    def get_doctor_info_by_doctor_id(doctor_id):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT * FROM EHRRecords WHERE doctorID = ? ORDER BY effDate DESC"
+        cursor.execute(sqlcmd1, doctor_id)
+        records = []
+        for dbrow in cursor.fetchall():
+            row = EHRRecordsModel(dbrow[0], dbrow[1], dbrow[2], dbrow[3], dbrow[4], dbrow[5], dbrow[6], dbrow[7],
+                                  dbrow[8], dbrow[9])
+            row.patientModel = PatientsModel.get_by_id(dbrow[2])
+            row.doctorModel = DoctorsModel.get_by_id(dbrow[3])
+            records.append(row)
+        cursor.close()
+        conn.close()
+        return records
+    
+    @staticmethod
+    def insert(obj):
+        obj.ehrRecordID = str(uuid.uuid4())
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "INSERT INTO EHRRecords (ehrRecordID,effDate,patientID,doctorID,disease,prescriptionFile) VALUES(?,?,?,?,?,?)"
+        cursor.execute(sqlcmd1, (obj.ehrRecordID,obj.effDate,obj.patientID,obj.doctorID,obj.disease,obj.prescriptionFile))
+        cursor.close()
+        conn.close()
+        
+
+        w3 = Web3(HTTPProvider('http://localhost:7545'))
+        #res = w3.isConnected()
+        
+        compiled_contract_path = '../../../EHR-Truffle/build/contracts/EHRRecordsContract.json'
+        deployed_contract_address = ehr_contract_address
+        
+        with open(compiled_contract_path) as file:
+            contract_json = json.load(file)
+            contract_abi = contract_json["abi"]
+        
+        contract = w3.eth.contract(address=deployed_contract_address, abi=contract_abi)
+        
+        accounts = w3.eth.accounts
+    
+        
+        tx_hash = contract.functions.perform_transactions(obj.ehrRecordID,obj.effDate,obj.patientID,obj.doctorID,obj.disease,obj.prescriptionFile).transact({'from': accounts[0]})
+        receipt = w3.eth.wait_for_transaction_receipt(tx_hash)        
+        print(receipt)
+    
+    @staticmethod
+    def update(obj):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "UPDATE EHRRecords SET effDate = ?,patientID = ?,doctorID = ?,disease = ?,prescriptionFile = ?,isBlockChainGenerated = ?,hash = ?,prevHash = ? WHERE ehrRecordID = ?"
+        cursor.execute(sqlcmd1,  (obj.effDate,obj.patientID,obj.doctorID,obj.disease,obj.prescriptionFile,obj.isBlockChainGenerated,obj.hash,obj.prevHash,obj.ehrRecordID))
+        cursor.close()
+        conn.close()
+    
+    @staticmethod
+    def delete(unique_id):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "DELETE FROM EHRRecords WHERE ehrRecordID = ?"
+        cursor.execute(sqlcmd1, (unique_id))
+        cursor.close()
+        conn.close()
