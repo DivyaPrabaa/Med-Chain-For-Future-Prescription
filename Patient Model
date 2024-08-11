@@ -1,0 +1,131 @@
+from Constants import connString
+import pyodbc
+import datetime
+import uuid
+from Constants import patient_contract_address
+from web3 import Web3, HTTPProvider
+import json
+import pprint
+
+
+class PatientsModel:
+    def _init_(self, patientID='', patientName='', contactNbr='', emailID='', address='', city='', county='',
+                 postcode='', country='', password='', medicinesUsed='', surgeries='', medicationHistory='',
+                 diseaseDuration='', dob=None):
+        self.patientID = patientID
+        self.patientName = patientName
+        self.contactNbr = contactNbr
+        self.emailID = emailID
+        self.address = address
+        self.city = city
+        self.county = county
+        self.postcode = postcode
+        self.country = country
+        self.password = password
+        self.medicinesUsed = medicinesUsed
+        self.surgeries = surgeries
+        self.medicationHistory = medicationHistory
+        self.diseaseDuration = diseaseDuration
+        self.dob = dob
+
+    @staticmethod
+    def get_all():
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT * FROM Patients ORDER BY patientName"
+        cursor.execute(sqlcmd1)
+        records = []
+        for dbrow in cursor.fetchall():
+            row = PatientsModel(dbrow.patientID, dbrow.patientName, dbrow.contactNbr, dbrow.emailID, dbrow.address,
+                                dbrow.city, dbrow.county, dbrow.postcode, dbrow.country, dbrow.password,
+                                dbrow.medicinesUsed, dbrow.surgeries, dbrow.medicationHistory, dbrow.diseaseDuration,
+                                dbrow.dob)
+            records.append(row)
+        cursor.close()
+        conn.close()
+        return records
+
+    @staticmethod
+    def get_name_id():
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT patientID, patientName FROM Patients ORDER BY patientName"
+        cursor.execute(sqlcmd1)
+        records = []
+        for dbrow in cursor.fetchall():
+            row = PatientsModel(dbrow.patientID, dbrow.patientName)
+            records.append(row)
+        cursor.close()
+        conn.close()
+        return records
+
+    @staticmethod
+    def get_by_id(unique_id):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT * FROM Patients WHERE patientID = ?"
+        cursor.execute(sqlcmd1, unique_id)
+        record = None
+        for dbrow in cursor.fetchall():
+            record = PatientsModel(dbrow.patientID, dbrow.patientName, dbrow.contactNbr, dbrow.emailID, dbrow.address,
+                                   dbrow.city, dbrow.county, dbrow.postcode, dbrow.country, dbrow.password,
+                                   dbrow.medicinesUsed, dbrow.surgeries, dbrow.medicationHistory, dbrow.diseaseDuration,
+                                   dbrow.dob)
+        cursor.close()
+        conn.close()
+        return record
+
+    @staticmethod
+    def get_name_by_emailid(email_id):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "SELECT patientID, patientName FROM Patients WHERE emailid = ?"
+        cursor.execute(sqlcmd1, email_id)
+        patient_id = ""
+        patient_name = ""
+        db_row = cursor.fetchone()
+        if db_row:
+            patient_id = db_row.patientID
+            patient_name = db_row.patientName
+        cursor.close()
+        conn.close()
+        return patient_id, patient_name
+
+    @staticmethod
+    def insert(obj):
+        obj.patientID = str(uuid.uuid4())
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "INSERT INTO Patients (patientID,patientName,contactNbr,emailID,address,city,county,postcode,country,password, medicinesUsed, surgeries, medicationHistory, diseaseDuration, dob) VALUES(?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?)"
+        cursor.execute(sqlcmd1, (
+        obj.patientID, obj.patientName, obj.contactNbr, obj.emailID, obj.address, obj.city, obj.county, obj.postcode,
+        obj.country, obj.password, obj.medicinesUsed, obj.surgeries, obj.medicationHistory, obj.diseaseDuration,
+        obj.dob))
+        cursor.close()
+        conn.close()
+
+
+
+    @staticmethod
+    def update(obj):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "UPDATE Patients SET patientName = ?,contactNbr = ?,emailID = ?,address = ?,city = ?,county = ?," \
+                  "postcode = ?,country = ?, password= ?, medicinesUsed= ?, surgeries= ?, medicationHistory= ?, " \
+                  "diseaseDuration= ?, dob = ? WHERE patientID = ?"
+        cursor.execute(sqlcmd1, (
+        obj.patientName, obj.contactNbr, obj.emailID, obj.address, obj.city, obj.county, obj.postcode, obj.country,
+         obj.password, obj.medicinesUsed, obj.surgeries, obj.medicationHistory, obj.diseaseDuration,
+        obj.dob, obj.patientID))
+
+        cursor.close()
+        conn.close()
+
+    @staticmethod
+    def delete(unique_id):
+        conn = pyodbc.connect(connString, autocommit=True)
+        cursor = conn.cursor()
+        sqlcmd1 = "DELETE FROM Patients WHERE patientID = ?"
+        cursor.execute(sqlcmd1, (unique_id))
+        cursor.close()
+        conn.close()
