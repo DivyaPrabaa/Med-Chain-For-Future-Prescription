@@ -1,0 +1,1005 @@
+from flask import Flask, request, render_template, redirect, url_for
+import os
+import pyodbc
+import hashlib
+import json
+from Constants import connString, is_email_id_already_exists
+from DoctorsModel import DoctorsModel
+from EHRRecordsModel import EHRRecordsModel
+from PatientsModel import PatientsModel
+from RoleModel import RoleModel
+from UsersModel import UsersModel
+
+app = Flask(_name_)
+
+
+def initialize():
+    global ehr_message, ehr_msg_type
+    ehr_message = ""
+    ehr_msg_type = ""
+
+
+def process_role(option_id):
+    if option_id == 0:
+        if not role_object.canDoctors:
+            return False
+
+    if option_id == 1:
+        if not role_object.canEHRRecords:
+            return False
+
+    if option_id == 2:
+        if not role_object.canPatients:
+            return False
+
+    if option_id == 3:
+        if not role_object.canRole:
+            return False
+
+    if option_id == 4:
+        if not role_object.canUsers:
+            return False
+    return True
+
+
+@app.route("/")
+def index():
+    global ehr_user_id, ehr_user_emailid
+    return render_template("EHRLogin.html")
+
+
+@app.route("/AuthenticateEHRLogin", methods=["POST"])
+def process_ehr_login():
+    global ehr_user_id, user_name, ehr_user_emailid, role_object, ehr_login_type,doctor_id,doctor_name,patient_id,patient_name
+    ehr_user_emailid = request.form["emailid"]
+    password = request.form["password"]
+    conn1 = pyodbc.connect(connString, autocommit=True)
+    cur1 = conn1.cursor()
+
+    sqlcmd1 = """SELECT * FROM Doctors WHERE emailid = '{0}' AND password = '{1}'""".format(
+        ehr_user_emailid, password)
+    cur1.execute(sqlcmd1)
+    row = cur1.fetchone()
+    if row:
+        ehr_login_type = "Doctor"
+        doctor_id, doctor_name = DoctorsModel.get_name_by_emailid(ehr_user_emailid)
+        return redirect(url_for("dashboard_ehr_doctor"))
+
+    sqlcmd1 = """SELECT * FROM Patients WHERE emailid = '{0}' AND password = '{1}'""".format(
+        ehr_user_emailid, password)
+    cur1.execute(sqlcmd1)
+    row = cur1.fetchone()
+    if row:
+        ehr_login_type = "Patient"
+        patient_id, patient_name = PatientsModel.get_name_by_emailid(ehr_user_emailid)
+        return redirect(url_for("dashboard_ehr_patient"))
+
+
+    sqlcmd1 = """SELECT * FROM Users WHERE emailid = '{0}' AND password = '{1}' AND isActive = 1""".format(
+        ehr_user_emailid, password)
+    cur1.execute(sqlcmd1)
+    row = cur1.fetchone()
+    if not row:
+        return render_template("EHRLogin.html", processResult="Invalid Electronic Health Record Credentials")
+    ehr_user_id = row[0]
+    user_name = row[1]
+    cur2 = conn1.cursor()
+    sqlcmd2 = "SELECT * FROM Role WHERE RoleID = '" + str(row[6]) + "'"
+    cur2.execute(sqlcmd2)
+    row2 = cur2.fetchone()
+
+    if not row2:
+        return render_template("EHRLogin.html", processResult="Invalid Role")
+
+    role_object = RoleModel(row2.roleID, row2.roleName, row2.canRole, row2.canUsers, row2.canDoctors,
+                            row2.canEHRRecords, row2.canPatients)
+
+    return render_template("DashboardEHR.html", userName=user_name)
+
+
+@app.route("/ChangePassword")
+def change_password():
+    global ehr_user_id, user_name, ehr_user_emailid
+    return render_template("ChangePassword.html", userName=user_name)
+
+
+@app.route("/ProcessChangePassword", methods=["POST"])
+def process_change_password():
+    global ehr_user_id, user_name, ehr_user_emailid
+    oldPassword = request.form["oldPassword"]
+    newPassword = request.form["newPassword"]
+    confirmPassword = request.form["confirmPassword"]
+    conn1 = pyodbc.connect(connString, autocommit=True)
+    cur1 = conn1.cursor()
+    sqlcmd1 = "SELECT * FROM Users WHERE emailid = '{0}' AND password = '{1}'".format(ehr_user_emailid, oldPassword)
+    cur1.execute(sqlcmd1)
+    row = cur1.fetchone()
+    cur1.commit()
+    if not row:
+        return render_template("ChangePassword.html", msg="Invalid Old Password", userName=user_name)
+
+    if newPassword.strip() != confirmPassword.strip():
+        return render_template("ChangePassword.html", msg="New Password and Confirm Password are NOT same", userName=user_name)
+
+    conn2 = pyodbc.connect(connString, autocommit=True)
+    cur2 = conn2.cursor()
+    sqlcmd2 = "UPDATE Users SET password = '{0}' WHERE emailid = '{1}'".format(newPassword, ehr_user_emailid)
+    cur1.execute(sqlcmd2)
+    cur2.commit()
+    return render_template("ChangePassword.html", msg="Electronic Health Record User Password Changed Successfully", userName=user_name)
+
+
+@app.route("/Dashboard")
+def dashboard():
+    global ehr_user_id, ehr_user_emailid
+    return render_template("DashboardEHR.html")
+
+@app.route("/DashboardEHRDoctor")
+def dashboard_ehr_doctor():
+    global ehr_user_id, ehr_user_emailid, ehr_message, ehr_msg_type, doctor_id, doctor_name
+    if doctor_id is None or doctor_id == '':
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+    ehr_login_type = "Doctor"
+
+    patients_list = EHRRecordsModel.get_all_patients_by_doctor_id(doctor_id)
+    return render_template("DashboardEHRDoctor.html", doctorName=doctor_name, records=patients_list)
+
+@app.route("/DashboardEHRPatient")
+def dashboard_ehr_patient():
+    global ehr_user_id, ehr_user_emailid, ehr_message, ehr_msg_type, patient_id, patient_name
+    if patient_id is None or patient_id == '':
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+
+
+    patients_list = EHRRecordsModel.get_all_patient_information_by_patient_id(patient_id)
+    return render_template("DashboardEHRPatient.html", patientName=patient_name, records=patients_list)
+
+
+@app.route("/information")
+def information():
+    global ehr_message, ehr_msg_type, user_name
+    print(ehr_message, ehr_msg_type)
+    return render_template("information.html", ehr_msg_type=ehr_msg_type, ehr_message=ehr_message, userName=user_name)
+
+
+@app.route("/InformationRegister")
+def information_register():
+    global ehr_message, ehr_msg_type
+    print(ehr_message, ehr_msg_type)
+    return render_template("InformationRegister.html", ehr_msg_type=ehr_msg_type, ehr_message=ehr_message)
+
+
+@app.route("/InformationDoctor")
+def information_doctor():
+    global ehr_message, ehr_msg_type, doctor_name
+    print(ehr_message, ehr_msg_type)
+    return render_template("InformationDoctor.html", ehr_msg_type=ehr_msg_type, ehr_message=ehr_message, doctorName=doctor_name)
+
+
+@app.route("/InformationPatient")
+def information_patient():
+    global ehr_message, ehr_msg_type, patient_id, patient_name
+    print(ehr_message, ehr_msg_type)
+    if patient_id is None or patient_id == '':
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+    return render_template("InformationPatient.html", ehr_msg_type=ehr_msg_type, ehr_message=ehr_message, patientName=patient_name)
+
+
+@app.route("/DoctorsListing")
+def doctors_listing():
+    global ehr_user_id, user_name, ehr_user_emailid, ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record  Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    can_doctors = process_role(0)
+
+    if not can_doctors:
+        ehr_message = "You Don't Have Permission to Access Doctors"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    records = DoctorsModel.get_all()
+
+    return render_template("DoctorsListing.html", records=records, userName=user_name)
+
+
+@app.route("/DoctorsOperation")
+def doctors_operation():
+    global ehr_user_id, user_name, ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    canDoctors = process_role(0)
+
+    if not canDoctors:
+        ehr_message = "You Don't Have Permission to Access Doctors"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    operation = request.args.get("operation")
+    row = DoctorsModel("", "")
+
+    if operation != "Create":
+        unique_id = request.args.get("unique_id").strip()
+        row = DoctorsModel.get_by_id(unique_id)
+
+    return render_template("DoctorsOperation.html", row=row, operation=operation, userName=user_name)
+
+
+@app.route("/ProcessDoctorsOperation", methods=["POST"])
+def process_doctors_operation():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object
+    ehr_retrieve = request.form
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+
+    canDoctors = process_role(0)
+    if not canDoctors:
+        ehr_message = "You Don't Have Permission to Access Doctors"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    operation = ehr_retrieve["operation"]
+    obj = DoctorsModel("", "")
+
+    if operation != "Delete":
+        obj.doctorID = ehr_retrieve['doctorID']
+        obj.doctorName = ehr_retrieve['doctorName']
+        obj.specialization = ehr_retrieve['specialization']
+        obj.contactNbr = ehr_retrieve['contactNbr']
+        obj.emailID = ehr_retrieve['emailID']
+        obj.address = ehr_retrieve['address']
+        obj.city = ehr_retrieve['city']
+        obj.county = ehr_retrieve['county']
+        obj.postcode = ehr_retrieve['postcode']
+        obj.country = ehr_retrieve['country']
+        obj.password = ehr_retrieve['password']
+        obj.emergencyContactNbr = ehr_retrieve['emergencyContactNbr']
+        obj.experience = ehr_retrieve['experience']
+        print(obj.experience,"obj.experience", obj.emergencyContactNbr)
+    if is_email_id_already_exists(obj.emailID, "Doctors", obj.doctorID):
+        ehr_message = "Email ID Already Exists"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    if operation == "Create":
+        obj.insert(obj)
+
+    if operation == "Edit":
+        obj.doctorID = ehr_retrieve["doctorID"]
+        obj.update(obj)
+
+    if operation == "Delete":
+        doctorID = ehr_retrieve["doctorID"]
+        obj.delete(doctorID)
+
+    return redirect(url_for("doctors_listing"))
+
+@app.route("/UpdateDoctorProfile")
+def update_doctor_profile():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object, doctor_id
+    if doctor_id is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information_doctor"))
+
+    row = DoctorsModel.get_by_id(doctor_id)
+
+    return render_template("UpdateDoctorProfile.html", row=row,operation='Edit', doctorName=doctor_name, actionType="UpdateDoctorProfile")
+
+
+@app.route("/ProcessUpdateDoctorProfile", methods=["POST"])
+def process_update_doctor_profile():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object, doctor_id, doctor_name
+    ehr_retrieve = request.form
+    if doctor_id is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+    obj = DoctorsModel("", "")
+
+    obj.doctorID = doctor_id
+    obj.doctorName = ehr_retrieve['doctorName']
+    obj.specialization = ehr_retrieve['specialization']
+    obj.contactNbr = ehr_retrieve['contactNbr']
+    obj.emailID = ehr_retrieve['emailID']
+    obj.address = ehr_retrieve['address']
+    obj.city = ehr_retrieve['city']
+    obj.county = ehr_retrieve['county']
+    obj.postcode = ehr_retrieve['postcode']
+    obj.country = ehr_retrieve['country']
+    obj.password = ehr_retrieve['password']
+    obj.emergencyContactNbr = ehr_retrieve['emergencyContactNbr']
+    obj.experience = ehr_retrieve['experience']
+    if is_email_id_already_exists(obj.emailID, "Doctors", obj.doctorID):
+        ehr_message = "Email ID Already Exists"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information_doctor"))
+
+    obj.update(obj)
+    ehr_message = "Profile Update Successfully"
+    ehr_msg_type = "Success"
+    return redirect(url_for("information_doctor"))
+
+
+@app.route("/DoctorCreation")
+def doctor_creation():
+    return render_template("DoctorCreation.html")
+
+
+@app.route("/ProcessDoctorCreation", methods=["POST"])
+def process_doctor_creation():
+    global ehr_message, ehr_msg_type
+    ehr_retrieve = request.form
+    obj = DoctorsModel("", "")
+    obj.doctorName = ehr_retrieve['doctorName']
+    obj.emailID = ehr_retrieve['emailID']
+    if is_email_id_already_exists(obj.emailID, "None", ''):
+        ehr_message = "Email ID Already Exists"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information_register"))
+
+    obj.password = ehr_retrieve['password']
+    obj.insert(obj)
+
+    return redirect(url_for("index"))
+
+
+@app.route("/ViewDoctor")
+def view_doctor():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object, patient_id, patient_name
+    if patient_id is None or patient_id == '':
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information_doctor"))
+    doctor_id = request.args.get("unique_id")
+    row = DoctorsModel.get_by_id(doctor_id)
+    return render_template("ViewDoctor.html", row=row,patientName=patient_name)
+
+
+@app.route("/EHRRecordsListing")
+def ehr_records_listing():
+    global ehr_user_id, ehr_user_emailid
+
+    global ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    canEHRRecords = process_role(1)
+
+    if not canEHRRecords:
+        ehr_message = "You Don't Have Permission to Access EHRRecords"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    records = EHRRecordsModel.get_all()
+
+    return render_template("EHRRecordsListing.html", records=records, userName=user_name)
+
+
+@app.route("/EHRRecordsOperation")
+def ehr_records_operation():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    canEHRRecords = process_role(1)
+
+    if not canEHRRecords:
+        ehr_message = "You Don't Have Permission to Access EHRRecords"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    operation = request.args.get("operation")
+    row = EHRRecordsModel("", "")
+
+    EHRRecords = EHRRecordsModel.get_all()
+
+    if operation != "Create":
+        unique_id = request.args.get("unique_id").strip()
+        row = EHRRecordsModel.get_by_id(unique_id)
+
+    patients = PatientsModel.get_name_id()
+    doctors = DoctorsModel.get_name_id()
+
+    return render_template("EHRRecordsOperation.html", row=row, operation=operation, EHRRecords=EHRRecords,
+                           patients=patients, doctors=doctors, userName=user_name)
+
+
+@app.route("/ProcessEHRRecordsOperation", methods=["POST"])
+def process_ehr_records_operation():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object
+    ehr_retrieve = request.form
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+
+    canEHRRecords = process_role(1)
+    if not canEHRRecords:
+        ehr_message = "You Don't Have Permission to Access EHRRecords"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    operation = ehr_retrieve["operation"]
+    obj = EHRRecordsModel("", "")
+    if operation != "Delete":
+        obj.ehrRecordID = ehr_retrieve['ehrRecordID']
+        obj.effDate = ehr_retrieve['effDate']
+        obj.patientID = ehr_retrieve['patientID']
+        obj.doctorID = ehr_retrieve['doctorID']
+        obj.disease = ehr_retrieve['disease']
+        if len(request.files) != 0:
+            file = request.files['prescriptionFile']
+            if file.filename != '':
+                prescriptionFile = file.filename
+                obj.prescriptionFile = prescriptionFile
+                f = os.path.join('static/UPLOADED_FILES', prescriptionFile)
+                file.save(f)
+            else:
+                obj.prescriptionFile = ehr_retrieve['hprescriptionFile']
+
+    if operation == "Create":
+        obj.insert(obj)
+
+    if operation == "Edit":
+        obj.ehrRecordID = ehr_retrieve["ehrRecordID"]
+        obj.update(obj)
+
+    if operation == "Delete":
+        ehrRecordID = ehr_retrieve["ehrRecordID"]
+        obj.delete(ehrRecordID)
+
+    return redirect(url_for("ehr_records_listing"))
+
+
+@app.route("/PatientsListing")
+def patients_listing():
+    global ehr_user_id,user_name, ehr_user_emailid
+
+    global ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    canPatients = process_role(2)
+
+    if not canPatients:
+        ehr_message = "You Don't Have Permission to Access Patients"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    records = PatientsModel.get_all()
+
+    return render_template("PatientsListing.html", records=records, userName=user_name)
+
+from datetime import date
+@app.route("/PatientsOperation")
+def patients_operation():
+    global ehr_user_id, user_name, ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    canPatients = process_role(2)
+
+    if not canPatients:
+        ehr_message = "You Don't Have Permission to Access Patients"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    operation = request.args.get("operation")
+    row = PatientsModel("", "")
+    today = date.today()
+    if operation != "Create":
+        unique_id = request.args.get("unique_id").strip()
+        row = PatientsModel.get_by_id(unique_id)
+
+    return render_template("PatientsOperation.html", row=row, operation=operation, today=today, userName=user_name)
+
+
+@app.route("/ProcessPatientsOperation", methods=["POST"])
+def process_patients_operation():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object
+    ehr_retrieve = request.form
+    if role_object is None:
+        ehr_message = "Electronic Health Record  Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+
+    canPatients = process_role(2)
+    if not canPatients:
+        ehr_message = "You Don't Have Permission to Access Patients"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    operation = ehr_retrieve["operation"]
+    obj = PatientsModel("", "")
+
+    if operation != "Delete":
+        obj.patientID = ehr_retrieve['patientID']
+        obj.patientName = ehr_retrieve['patientName']
+        obj.contactNbr = ehr_retrieve['contactNbr']
+        obj.emailID = ehr_retrieve['emailID']
+        obj.address = ehr_retrieve['address']
+        obj.city = ehr_retrieve['city']
+        obj.county = ehr_retrieve['county']
+        obj.postcode = ehr_retrieve['postcode']
+        obj.country = ehr_retrieve['country']
+        obj.password = ehr_retrieve['password']
+        obj.medicinesUsed = ehr_retrieve['medicinesUsed']
+        obj.surgeries = ehr_retrieve['surgeries']
+        obj.medicationHistory = ehr_retrieve['medicationHistory']
+        obj.diseaseDuration = ehr_retrieve['diseaseDuration']
+        obj.dob = ehr_retrieve['dob']
+    if is_email_id_already_exists(obj.emailID, "Patients", obj.patientID):
+        ehr_message = "Email ID Already Exists"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    if operation == "Create":
+        obj.insert(obj)
+
+    if operation == "Edit":
+        obj.patientID = ehr_retrieve["patientID"]
+        obj.update(obj)
+
+    if operation == "Delete":
+        patientID = ehr_retrieve["patientID"]
+        obj.delete(patientID)
+
+    return redirect(url_for("patients_listing"))
+
+@app.route("/UpdatePatientProfile")
+def update_patient_profile():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object, patient_id, patient_name
+    if patient_id is None or patient_id == '':
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information_doctor"))
+
+    row = PatientsModel.get_by_id(patient_id)
+    today = date.today()
+    return render_template("UpdatePatientProfile.html", row=row,operation='Edit', today=today, patientName=patient_name, actionType="UpdatePatientProfile")
+
+
+@app.route("/ProcessUpdatePatientProfile", methods=["POST"])
+def process_update_patient_profile():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object, patient_id, patient_name
+    ehr_retrieve = request.form
+    if patient_id is None or patient_id == '':
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+    obj = PatientsModel("", "")
+
+    obj.patientID = patient_id
+    obj.patientName = ehr_retrieve['patientName']
+    obj.contactNbr = ehr_retrieve['contactNbr']
+    obj.emailID = ehr_retrieve['emailID']
+    obj.address = ehr_retrieve['address']
+    obj.city = ehr_retrieve['city']
+    obj.county = ehr_retrieve['county']
+    obj.postcode = ehr_retrieve['postcode']
+    obj.country = ehr_retrieve['country']
+    obj.password = ehr_retrieve['password']
+    obj.medicinesUsed = ehr_retrieve['medicinesUsed']
+    obj.surgeries = ehr_retrieve['surgeries']
+    obj.medicationHistory = ehr_retrieve['medicationHistory']
+    obj.diseaseDuration = ehr_retrieve['diseaseDuration']
+    obj.dob = ehr_retrieve['dob']
+    if is_email_id_already_exists(obj.emailID, "Patients", obj.patientID):
+        ehr_message = "Email ID Already Exists"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information_doctor"))
+
+    obj.update(obj)
+    ehr_message = "Profile Update Successfully"
+    ehr_msg_type = "Success"
+    return redirect(url_for("information_patient"))
+
+
+@app.route("/PatientCreation")
+def patient_creation():
+    return render_template("PatientCreation.html")
+
+
+@app.route("/ProcessPatientCreation", methods=["POST"])
+def process_patient_creation():
+    global ehr_message, ehr_msg_type
+    ehr_retrieve = request.form
+    obj = PatientsModel("", "")
+    obj.patientName = ehr_retrieve['patientName']
+    obj.emailID = ehr_retrieve['emailID']
+    if is_email_id_already_exists(obj.emailID, "None", ''):
+        ehr_message = "Email ID Already Exists"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information_register"))
+
+    obj.password = ehr_retrieve['password']
+    obj.insert(obj)
+
+    return redirect(url_for("index"))
+
+@app.route("/ViewPatient")
+def view_patient():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object, doctor_id, doctor_name
+    if doctor_id is None or doctor_id == '':
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information_doctor"))
+    patient_id = request.args.get("unique_id")
+    row = PatientsModel.get_by_id(patient_id)
+    return render_template("ViewPatient.html", row=row,doctorName=doctor_name)
+
+@app.route("/RoleListing")
+def role_listing():
+    global ehr_user_id, ehr_user_emailid
+
+    global ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    canRole = process_role(3)
+
+    if not canRole:
+        ehr_message = "You Don't Have Permission to Access Role"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    records = RoleModel.get_all()
+
+    return render_template("RoleListing.html", records=records, userName=user_name)
+
+
+@app.route("/RoleOperation")
+def role_operation():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    canRole = process_role(3)
+
+    if not canRole:
+        ehr_message = "You Don't Have Permission to Access Role"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    operation = request.args.get("operation")
+    row = RoleModel("", "")
+
+    Role = RoleModel.get_all()
+
+    if operation != "Create":
+        unique_id = request.args.get("unique_id").strip()
+        row = RoleModel.get_by_id(unique_id)
+
+    return render_template("RoleOperation.html", row=row, operation=operation, Role=Role, userName=user_name)
+
+
+@app.route("/ProcessRoleOperation", methods=["POST"])
+def process_role_operation():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object
+    ehr_retrieve = request.form
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+
+    canRole = process_role(3)
+    if not canRole:
+        ehr_message = "You Don't Have Permission to Access Role"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    operation = ehr_retrieve["operation"]
+    obj = RoleModel("", "")
+
+    if operation != "Delete":
+        obj.roleID = ehr_retrieve['roleID']
+        obj.roleName = ehr_retrieve['roleName']
+        obj.canRole = 0
+        if ehr_retrieve.get("canRole") is not None:
+            obj.canRole = 1
+        obj.canUsers = 0
+        if ehr_retrieve.get("canUsers") is not None:
+            obj.canUsers = 1
+        obj.canDoctors = 0
+        if ehr_retrieve.get("canDoctors") is not None:
+            obj.canDoctors = 1
+        obj.canEHRRecords = 0
+        if ehr_retrieve.get("canEHRRecords") is not None:
+            obj.canEHRRecords = 1
+        obj.canPatients = 0
+        if ehr_retrieve.get("canPatients") is not None:
+            obj.canPatients = 1
+
+    if operation == "Create":
+        obj.insert(obj)
+
+    if operation == "Edit":
+        obj.roleID = ehr_retrieve["roleID"]
+        obj.update(obj)
+
+    if operation == "Delete":
+        roleID = ehr_retrieve["roleID"]
+        obj.delete(roleID)
+
+    return redirect(url_for("role_listing"))
+
+
+@app.route("/UsersListing")
+def users_listing():
+    global ehr_user_id, ehr_user_emailid, ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    canUsers = process_role(4)
+
+    if not canUsers:
+        ehr_message = "You Don't Have Permission to Access Users"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    records = UsersModel.get_all()
+
+    return render_template("UsersListing.html", records=records, userName=user_name)
+
+
+@app.route("/UsersOperation")
+def users_operation():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    canUsers = process_role(4)
+
+    if not canUsers:
+        ehr_message = "You Don't Have Permission to Access Users"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+    operation = request.args.get("operation")
+    row = UsersModel("", "")
+
+    if operation != "Create":
+        unique_id = request.args.get("unique_id").strip()
+        row = UsersModel.get_by_id(unique_id)
+    roles = RoleModel.get_name_id()
+    return render_template("UsersOperation.html", row=row, operation=operation, roles=roles, userName=user_name)
+
+
+@app.route("/ProcessUsersOperation", methods=["POST"])
+def process_users_operation():
+    global ehr_user_id, ehr_message, ehr_msg_type, role_object
+    ehr_retrieve = request.form
+    if role_object is None:
+        ehr_message = "Electronic Health Record Application Error Occurred. Logout"
+        ehr_msg_type = "Error"
+        return redirect(url_for("/"))
+
+    canUsers = process_role(4)
+    if not canUsers:
+        ehr_message = "You Don't Have Permission to Access Users"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    operation = ehr_retrieve["operation"]
+    obj = UsersModel("", "")
+
+    if operation != "Delete":
+        obj.userID = ehr_retrieve['userID']
+        obj.userName = ehr_retrieve['userName']
+        obj.emailid = ehr_retrieve['emailid']
+        obj.password = ehr_retrieve['password']
+        obj.contactNo = ehr_retrieve['contactNo']
+        obj.isActive = 0
+        if ehr_retrieve.get("isActive") is not None:
+            obj.isActive = 1
+        obj.roleID = ehr_retrieve['roleID']
+
+    if is_email_id_already_exists(obj.emailid, "Users", obj.userID):
+        ehr_message = "Email ID Already Exists"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information"))
+
+    if operation == "Create":
+        obj.insert(obj)
+
+    if operation == "Edit":
+        obj.userID = ehr_retrieve["userID"]
+        obj.update(obj)
+
+    if operation == "Delete":
+        userID = ehr_retrieve["userID"]
+        obj.delete(userID)
+
+    return redirect(url_for("users_listing"))
+
+
+@app.route("/AdminCreation")
+def admin_creation():
+    return render_template("AdminCreation.html")
+
+
+@app.route("/ProcessAdminCreation", methods=["POST"])
+def process_admin_creation():
+    global ehr_message, ehr_msg_type
+    ehr_retrieve = request.form
+    obj = UsersModel("", "")
+    obj.userName = ehr_retrieve['userName']
+    obj.emailid = ehr_retrieve['emailID']
+    obj.contactNo = ''
+    obj.isActive = True
+    obj.roleID = '1'
+    if is_email_id_already_exists(obj.emailid, "None", ''):
+        ehr_message = "Email ID Already Exists"
+        ehr_msg_type = "Error"
+        return redirect(url_for("information_register"))
+
+    obj.password = ehr_retrieve['password']
+    obj.insert(obj)
+
+    return redirect(url_for("index"))
+
+
+@app.route("/BlockChainGeneration")
+def block_chain_generation():
+    conn = pyodbc.connect(connString, autocommit=True)
+    cursor = conn.cursor()
+    sqlcmd = "SELECT COUNT(*) FROM EHRRecords WHERE isBlockChainGenerated = 1"
+    cursor.execute(sqlcmd)
+    blks_created = 0
+    while True:
+        dbrow = cursor.fetchone()
+        if not dbrow:
+            break
+        blks_created = dbrow[0]
+
+    sqlcmd = "SELECT COUNT(*) FROM EHRRecords WHERE isBlockChainGenerated = 0 or isBlockChainGenerated is null"
+    cursor.execute(sqlcmd)
+    blks_not_created = 0
+    while True:
+        dbrow = cursor.fetchone()
+        if not dbrow:
+            break
+        blks_not_created = dbrow[0]
+    return render_template('BlockChainGeneration.html', blocksCreated=blks_created, blocksNotCreated=blks_not_created, userName=user_name)
+
+
+@app.route("/ProcessBlockchainGeneration", methods=['POST'])
+def process_block_chain_generation():
+    conn = pyodbc.connect(connString, autocommit=True)
+    cursor = conn.cursor()
+    sqlcmd = "SELECT COUNT(*) FROM EHRRecords WHERE isBlockChainGenerated = 1"
+    cursor.execute(sqlcmd)
+    blocksCreated = 0
+    while True:
+        dbrow = cursor.fetchone()
+        if not dbrow:
+            break
+        blocksCreated = dbrow[0]
+
+    prevHash = ""
+    if blocksCreated != 0:
+        connx = pyodbc.connect(connString, autocommit=True)
+        cursorx = connx.cursor()
+        sqlcmdx = "SELECT * FROM EHRRecords WHERE isBlockChainGenerated = 0 or isBlockChainGenerated is null ORDER BY " \
+                  "sequenceNumber "
+        cursorx.execute(sqlcmdx)
+        dbrowx = cursorx.fetchone()
+        if dbrowx:
+            uniqueID = dbrowx[9]
+            conny = pyodbc.connect(connString, autocommit=True)
+            cursory = conny.cursor()
+            sqlcmdy = "SELECT hash FROM EHRRecords WHERE sequenceNumber < '" + str(
+                uniqueID) + "' ORDER BY sequenceNumber DESC"
+            cursory.execute(sqlcmdy)
+            dbrowy = cursory.fetchone()
+            if dbrowy:
+                prevHash = dbrowy[0]
+            cursory.close()
+            conny.close()
+        cursorx.close()
+        connx.close()
+    conn = pyodbc.connect(connString, autocommit=True)
+    cursor = conn.cursor()
+    sqlcmd = "SELECT * FROM EHRRecords WHERE isBlockChainGenerated = 0 or isBlockChainGenerated is null ORDER BY " \
+             "sequenceNumber "
+    cursor.execute(sqlcmd)
+
+    while True:
+        dbrow = cursor.fetchone()
+        if not dbrow:
+            break
+        unqid = str(dbrow[9])
+
+        bdata = str(dbrow[1]) + str(dbrow[2]) + str(dbrow[3]) + str(dbrow[4])
+        block_serialized = json.dumps(bdata, sort_keys=True).encode('utf-8')
+        block_hash = hashlib.sha256(block_serialized).hexdigest()
+
+        conn1 = pyodbc.connect(connString, autocommit=True)
+        cursor1 = conn1.cursor()
+        sqlcmd1 = "UPDATE EHRRecords SET isBlockChainGenerated = 1, hash = '{0}', prevHash = '{1}' WHERE " \
+                  "sequenceNumber = '{2}'".format(block_hash, prevHash, unqid)
+        cursor1.execute(sqlcmd1)
+        cursor1.close()
+        conn1.close()
+        prevHash = block_hash
+    return render_template('BlockchainGenerationResult.html', userName=user_name)
+
+
+@app.route("/BlockChainReport")
+def block_chain_report():
+    conn = pyodbc.connect(connString, autocommit=True)
+    cursor = conn.cursor()
+
+    sqlcmd1 = "SELECT * FROM EHRRecords WHERE isBlockChainGenerated = 1"
+    cursor.execute(sqlcmd1)
+    conn2 = pyodbc.connect(connString, autocommit=True)
+    cursor = conn2.cursor()
+    sqlcmd1 = "SELECT * FROM EHRRecords ORDER BY sequenceNumber DESC"
+    cursor.execute(sqlcmd1)
+    records = []
+
+    while True:
+        dbrow = cursor.fetchone()
+        if not dbrow:
+            break
+        row = EHRRecordsModel(dbrow[0], dbrow[1], dbrow[2], dbrow[3], dbrow[4], dbrow[5], dbrow[6], dbrow[7], dbrow[8],
+                              dbrow[9])
+        records.append(row)
+    return render_template('BlockChainReport.html', records=records, userName=user_name)
+
+
+@app.route("/PatientWiseReport")
+def patient_wise_report():
+    patients = PatientsModel.get_name_id()
+    return render_template("PatientWiseReport.html", patients=patients, userName=user_name)
+
+
+@app.route("/ProcessPatientWiseReport", methods=["POST"])
+def process_patient_wise_report():
+    patient_id = request.form["patientID"]
+    records = EHRRecordsModel.get_patient_info_by_patient_id(patient_id)
+    return render_template("PatientWiseReportResult.html", records=records, userName=user_name)
+
+
+@app.route("/DoctorWiseReport")
+def doctor_wise_report():
+    doctors = DoctorsModel.get_name_id()
+    return render_template("DoctorWiseReport.html", doctors=doctors, userName=user_name)
+
+
+@app.route("/ProcessDoctorWiseReport", methods=["POST"])
+def process_doctor_wise_report():
+    doctor_id = request.form["doctorID"]
+    records = EHRRecordsModel.get_doctor_info_by_doctor_id(doctor_id)
+    return render_template("DoctorWiseReportResult.html", records=records, userName=user_name)
+
+
+app.secret_key = "dsuih798GG2UHYG@#"
+ctx = app.app_context()
+ctx.push()
+
+if _name_ == "_main_":
+    ehr_login_type = ""
+    doctor_id = None
+    doctor_name = None
+    patient_id = None
+    patient_name = None
+    ehr_user_id = ""
+    ehr_user_emailid = ""
+    user_name = ""
+    role_object = RoleModel(0)
+    ehr_message = ""
+    ehr_msg_type = ""
+    app.run()
