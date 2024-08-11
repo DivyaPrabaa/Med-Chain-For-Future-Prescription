@@ -1,5 +1,4 @@
 # Med-Chain-For-Future-Prescription
-# EHRV1 Server
 import pyodbc
 
 serverName = "DIVYA\SQLEXPRESS"
