@@ -1,1 +1,49 @@
 # Med-Chain-For-Future-Prescription
+# EHRV1 Server
+import pyodbc
+
+serverName = "DIVYA\SQLEXPRESS"
+databaseName = "EHRV1"
+connString = "Driver={SQL Server};Server=" + serverName + ";Integrated_Security=true;Database=" + databaseName
+ehr_contract_address = "0xa577568CC4C2B480B59f356e80698c40eD881412"
+doctor_contract_address = "0x128E8845A5672f28D20d4Ac3E526b56632c5aF0a"
+patient_contract_address = "0x5Fb6335534Ad510b8CC6332fdf3B8AFbBb5A3F64"
+
+def is_email_id_already_exists(email_id, type, unique_id):
+    conn = pyodbc.connect(connString, autocommit=True)
+    cursor = conn.cursor()
+    where = ""
+    if type == "Users":
+        where = " AND userID <> '{0}'".format(unique_id)
+    sqlcmd1 = "SELECT * FROM Users WHERE emailid = ?" + where
+    print(sqlcmd1)
+    cursor.execute(sqlcmd1, email_id)
+    available = False
+    db_row = cursor.fetchone()
+    if db_row:
+        available = True
+
+    where = ""
+    if type == "Patients":
+        where = " AND patientID <> '{0}'".format(unique_id)
+    sqlcmd1 = "SELECT * FROM Patients WHERE emailid = ?"+where
+    print(sqlcmd1)
+    cursor.execute(sqlcmd1, email_id)
+    db_row = cursor.fetchone()
+    if db_row:
+        available = True
+
+    where = ""
+    if type == "Doctors":
+        where = " AND doctorID <> '{0}'".format(unique_id)
+    sqlcmd1 = "SELECT * FROM Doctors WHERE emailid = ?"+where
+    print(sqlcmd1)
+    cursor.execute(sqlcmd1, email_id)
+    db_row = cursor.fetchone()
+    if db_row:
+        available = True
+
+    cursor.close()
+    conn.close()
+    return available
+    
